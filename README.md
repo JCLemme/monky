@@ -7,4 +7,4 @@ A simple print quota manager for CUPS
 Monky is a print quota and accounting software for CUPS. 
 
 ## How do I use it?
-Monky isn't ready for primetime yet. Check back here soon^TM for updates.
+Monky isn't ready for primetime yet. Check back here soon<sup>TM</sup> for updates.
