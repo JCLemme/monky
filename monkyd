@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+
+import sys
+import logging as log
+from pymongo import MongoClient
+from pkpgpdls import analyzer 
+
+# Set up logging utility
+log.basicConfig(filename='/var/log/cups/monky.log', level=log.INFO)
+
+if(len(sys.argv) < 9):
+    log.critical("Tea4Cups did not provide us every argument")
+    sys.exit(-1);
+
+# Grab command line arguments
+printerName = sys.argv[1]
+dataFile = sys.argv[2]
+jobSize = sys.argv[3]
+clientHost = sys.argv[4]
+jobID = sys.argv[5]
+userName = sys.argv[6]
+jobTitle = sys.argv[7]
+jobCopies = sys.argv[8]
+
+log.info("!!! New job from user " + userName + " at " + clientHost + " - datafile '" + dataFile + "'")
+log.info("  Requesting " + str(jobCopies) + " cop[y/ies] of document '" + jobTitle + "' (id " + str(jobID) + ") to be printed on " + printerName)
+
+# Connect to the Mongo database
+dbcontrol = MongoClient()
+quotadb = dbcontrol["monky"]["quotas"]
+printerdb = dbcontrol["monky"]["printers"]
+
+# Look for the user
+foundUser = {}
+
+if(quotadb.find_one({"user": userName}) == None):
+    log.info("  User " + userName + " does not exist")
+    log.info("  Creating user " + userName + " with default quota info")
+    quotadb.insert({"user": userName, "bw": 400, "color": 200, "large": False, "addedbw": 0, "addedcolor": 0})
+
+foundUser = quotadb.find_one({"user": userName})
+log.info("  Found user " + userName + " with quotas bw:" + str(foundUser["bw"]) + " c:" + str(foundUser["color"]))
+
+docLength = 0
+docColor = 0
+
+# Get color and page count from the document
+docInfo = analyzer.PDLAnalyzer(dataFile, analyzer.AnalyzerOptions(colorspace="gc", resolution=72))
+
+try:
+    docLength = docInfo.getJobSize()
+    docColor = docInfo.getInkCoverage()[1][0]["C"]
+except(analyzer.PDLParserError):
+    log.warning("  Failed to identify file type. Ignoring output and billing as black/white")
+
+log.info("  Job is " + str(docLength) + " page[s] long and uses " + str(docColor) + "% color ink")
+
+# If we are billing on a printer basis, override color info based on printer
+if(true):
+    foundPrinter = printerdb.find_one({"name": printerName})
+
+    if(foundPrinter == None):
+        log.warning("  Did not recognize printer. Ignoring printer ID and billing as black/white")
+    else:
+        if(foundPrinter["color"] == True):
+            docColor = 100
+        else:
+            docColor = 0
+
+# Reject if the document is a biggun
+if(foundUser["large"] == False):
+    if(docLength > 50 or int(jobSize) > 104857600):
+        log.warning("  Job rejected - file exceeds standard limits")
+        sys.exit(-1)
+else:
+    log.info("  User has authentication to print large files")
+    foundUser["large"] = false
+
+# See if we fit the job
+totalPages = docLength*int(jobCopies)
+totalColor = totalPages*(100/docColor)
+
+if(foundUser["bw"] < (totalPages-totalColor) and foundUser["bw"] != -1):
+    log.warning("  Job rejected - user needs " + str((totalPages-totalColor)-foundUser["bw"]) + " more black/white pages")
+    sys.exit(-1)
+
+if(foundUser["color"] < totalColor and foundUser["color"] != -1):
+    log.warning("  Job rejected - user needs " + str(totalColor-foundUser["color"]) + " more color pages")
+    sys.exit(-1)
+
+foundUser["bw"] -= (totalPages-totalColor)
+foundUser["color"] -= totalColor
+
+log.info("  Job accepted - will use " + str(totalPages-totalColor) + "black/white pages and " + str(totalColor) + " color pages")

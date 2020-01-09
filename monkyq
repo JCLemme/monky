@@ -1,0 +1,58 @@
+#!/usr/bin/env python
+
+import sys
+import logging as log
+import  mongoengine as mongo
+from pkpgpdls import analyzer 
+
+if(len(sys.argv) < 2):
+    print("Usage: monkyq [username]")
+    print("       monkyq [username] setbw [pages]")
+    print("       monkyq [username] setcolor [pages]")
+    print("       monkyq [username] setquota <true/false>")
+    print("       monkyq [username] setlarge <true/false>")
+    sys.exit(-1);
+
+# Connect to the Mongo database
+class Quota(mongo.Document):
+    username=mongo.StringField(required=True)
+    info=mongo.StringField(required=True)
+    blackwhite=mongo.IntField(required=True)
+    color=mongo.IntField(required=True)
+
+mongo.connect("quotainfo")
+
+# Look for the user
+userQuery = Quota.objects(username=sys.argv[1])
+foundUser = Quota(username=sys.argv[1], info="", blackwhite=400, color=200)
+
+if(userQuery.count() < 1):
+    print("User " + sys.argv[1] + " does not exist.")
+    print("Their quota information will be created when they submit their first print job.")
+    sys.exit(-1)
+else:
+    foundUser = userQuery.first()
+
+# Print quota information
+if(len(sys.argv) < 3):
+    print("User " + sys.argv[1] + ":")
+    print("B/W      " + str(foundUser.blackwhite))
+    print("Color    " + str(foundUser.color))
+    
+    if("LargeFile" in foundUser.info):
+        print("User can print large files.")
+    
+    if("NoQuota" in foundUser.info):
+        print("User does not have a quota limit.")
+else:
+    if(sys.argv[2] == "setbw"):
+        foundUser.blackwhite = str(sys.argv[3])
+    elif(sys.argv[2] == "setcolor"):
+        foundUser.color = str(sys.argv[3])
+    elif(sys.argv[2] == "setinfo"):
+        foundUser.info = sys.argv[3]
+    else:
+        print("Unknown command \"" + sys.argv[2] + "\".")
+        sys.exit(-1)
+
+    foundUser.save()
